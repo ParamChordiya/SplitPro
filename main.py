@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session
 import sqlite3
 import os
 
+
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
@@ -59,6 +60,7 @@ conn.execute(
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL
     )
 """
@@ -93,10 +95,14 @@ def add_transaction(group_id):
     group_members = cursor.fetchall()
 
     selected_members = request.form.getlist("split_members")
-    print("Selected Members:", selected_members)  # Add this line to print selected members
+    print(
+        "Selected Members:", selected_members
+    )  # Add this line to print selected members
 
     # Split the amount equally among selected group members
-    split_amount = amount / (len(selected_members) + 1)  # Including the user who added the transaction
+    split_amount = amount / (
+        len(selected_members) + 1
+    )  # Including the user who added the transaction
 
     for member_id in selected_members:
         conn.execute(
@@ -138,11 +144,15 @@ def split_transaction(transaction_id, group_id):
     return redirect(url_for("group", group_id=group_id))
 
 
+# @app.route("/register", methods=["GET", "POST"])
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
         username = request.form.get("username")
+        email = request.form.get("email")
         password = request.form.get("password")
+        confirm_password = request.form.get("confirm_password")
+        # dob = request.form.get("dob")
 
         # Check if the username already exists
         conn = sqlite3.connect("groups.db")
@@ -154,7 +164,8 @@ def register():
 
         # Add the new user to the database
         conn.execute(
-            "INSERT INTO users (username, password) VALUES (?, ?)", (username, password)
+            "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
+            (username, email, password)
         )
         conn.commit()
         conn.close()
@@ -188,9 +199,12 @@ def login():
 
     return render_template("login.html")
 
+@app.route("/")
+def landing():
+    return render_template("landing.html")
 
 # Routes
-@app.route("/")
+@app.route("/index")
 def index():
     # Check if the user is logged in
     if "user_id" not in session:
@@ -201,7 +215,7 @@ def index():
     cursor = conn.execute("SELECT id, name FROM groups")
     groups = cursor.fetchall()
     conn.close()
-    return render_template("index.html", groups=groups)
+    return render_template("index.html", groups=groups,is_group_visible=is_group_visible)
 
 
 @app.route("/create_group", methods=["POST"])
@@ -235,7 +249,7 @@ def create_group():
 @app.route("/logout")
 def logout():
     session.pop("user_id", None)
-    return redirect(url_for("login"))
+    return redirect(url_for("landing"))
 
 
 @app.route("/group/<int:group_id>")
@@ -246,7 +260,7 @@ def group(group_id):
 
     # Check if the user is a member of the group or the group creator
     user_id = session["user_id"]
-    
+
     conn = sqlite3.connect("groups.db")
     cursor = conn.execute(
         "SELECT * FROM members WHERE group_id = ? AND user_id = ?", (group_id, user_id)
@@ -283,11 +297,13 @@ def group(group_id):
         user_id=user_id,
         group_members=group_members,
         get_split_details=get_split_details,
-        get_username = get_username,
-        lenoffun = lenoffun,
+        get_username=get_username,
+        lenoffun=lenoffun,
         total_owe=total_owe,
         total_receive=total_receive,
     )
+
+
 # Modify this helper function in your Flask app
 def calculate_total_owe(group_id, user_id):
     conn = sqlite3.connect("groups.db")
@@ -302,6 +318,7 @@ def calculate_total_owe(group_id, user_id):
     total_owe = cursor.fetchone()[0] or 0
     conn.close()
     return total_owe
+
 
 # Modify this helper function in your Flask app
 def calculate_total_receive(group_id, user_id):
@@ -357,6 +374,7 @@ def add_member(group_id):
     conn.close()
     return redirect(url_for("group", group_id=group_id))
 
+
 @app.route("/delete_transaction/<int:group_id>/<int:transaction_id>")
 def delete_transaction(group_id, transaction_id):
     # Check if the user is logged in
@@ -366,7 +384,8 @@ def delete_transaction(group_id, transaction_id):
     # Check if the user is the creator of the transaction
     conn = sqlite3.connect("groups.db")
     cursor = conn.execute(
-        "SELECT * FROM transactions WHERE id = ? AND user_id = ?", (transaction_id, session["user_id"])
+        "SELECT * FROM transactions WHERE id = ? AND user_id = ?",
+        (transaction_id, session["user_id"]),
     )
     transaction = cursor.fetchone()
 
@@ -374,12 +393,16 @@ def delete_transaction(group_id, transaction_id):
         return "You do not have permission to delete this transaction."
 
     # Delete the transaction and associated splits
-    conn.execute("DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,))
+    conn.execute(
+        "DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,)
+    )
     conn.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
     conn.commit()
     conn.close()
 
     return redirect(url_for("group", group_id=group_id))
+
+
 # Add these functions to your Flask app
 def get_split_details(transaction_id):
     conn = sqlite3.connect("groups.db")
@@ -390,6 +413,20 @@ def get_split_details(transaction_id):
     split_details = cursor.fetchall()
     conn.close()
     return split_details
+def is_group_visible(group_id):
+    if "user_id" not in session:
+        return False
+
+    user_id = session["user_id"]
+    conn = sqlite3.connect("groups.db")
+    cursor = conn.execute(
+        "SELECT * FROM members WHERE group_id = ? AND (user_id = ?)",
+        (group_id, user_id),
+    )
+    is_member_or_creator = cursor.fetchone()
+    conn.close()
+
+    return bool(is_member_or_creator)
 
 
 def get_username(user_id):
@@ -399,9 +436,10 @@ def get_username(user_id):
     conn.close()
     return username
 
+
 def lenoffun(a):
     return len(a)
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
