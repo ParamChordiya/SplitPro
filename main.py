@@ -1,6 +1,19 @@
 from flask import Flask, render_template, request, redirect, url_for, session
 import sqlite3
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from random import randint
+import os
+from decouple import config
+import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from random import randint
 
 
 app = Flask(__name__)
@@ -67,6 +80,24 @@ conn.execute(
 )
 conn.close()
 
+# def send_otp(email, otp):
+#     sender_email = config("GMAIL_ID")  # Replace with your Gmail email
+#     sender_password = config("GMAIL_PASSWORD")  # Use environment variable for the password
+
+#     subject = "Email Verification OTP"
+#     body = f"Your OTP for email verification is: {otp}"
+
+#     message = MIMEMultipart()
+#     message["From"] = sender_email
+#     message["To"] = email
+#     message["Subject"] = subject
+#     message.attach(MIMEText(body, "plain"))
+
+#     with smtplib.SMTP("smtp.gmail.com", 587) as server:
+#         server.starttls()
+#         server.login(sender_email, sender_password)
+#         server.sendmail(sender_email, email, message.as_string())
+
 
 @app.route("/add_transaction/<int:group_id>", methods=["POST"])
 def add_transaction(group_id):
@@ -78,6 +109,10 @@ def add_transaction(group_id):
     transaction_name = request.form.get("transaction_name")
     amount = float(request.form.get("amount"))
     user_id = session["user_id"]
+
+    # Check if the amount is greater than 0
+    if amount <= 0:
+        return "Amount must be greater than 0."
 
     # Add the transaction to the database
     conn = sqlite3.connect("groups.db")
@@ -109,6 +144,7 @@ def add_transaction(group_id):
             "INSERT INTO transaction_splits (transaction_id, user_id, amount) VALUES (?, ?, ?)",
             (transaction_id, member_id, split_amount),
         )
+        
 
     conn.commit()
     conn.close()
@@ -152,7 +188,14 @@ def register():
         email = request.form.get("email")
         password = request.form.get("password")
         confirm_password = request.form.get("confirm_password")
-        # dob = request.form.get("dob")
+        # otp = randint(100000, 999999)  # Generate a 6-digit OTP
+
+        # Validate password
+        if not re.match(
+            r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$",
+            password,
+        ):
+            return "Password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, one digit, and one special character."
 
         # Check if the username already exists
         conn = sqlite3.connect("groups.db")
@@ -165,10 +208,12 @@ def register():
         # Add the new user to the database
         conn.execute(
             "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-            (username, email, password)
+            (username, email, password),
         )
         conn.commit()
         conn.close()
+        # # Send OTP to the user's email for verification
+        # send_otp(email, otp)
 
         return redirect(url_for("login"))
 
@@ -199,9 +244,11 @@ def login():
 
     return render_template("login.html")
 
+
 @app.route("/")
 def landing():
     return render_template("landing.html")
+
 
 # Routes
 @app.route("/index")
@@ -215,7 +262,9 @@ def index():
     cursor = conn.execute("SELECT id, name FROM groups")
     groups = cursor.fetchall()
     conn.close()
-    return render_template("index.html", groups=groups,is_group_visible=is_group_visible)
+    return render_template(
+        "index.html", groups=groups, is_group_visible=is_group_visible
+    )
 
 
 @app.route("/create_group", methods=["POST"])
@@ -413,6 +462,8 @@ def get_split_details(transaction_id):
     split_details = cursor.fetchall()
     conn.close()
     return split_details
+
+
 def is_group_visible(group_id):
     if "user_id" not in session:
         return False
@@ -442,4 +493,4 @@ def lenoffun(a):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)
